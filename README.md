@@ -1,3 +1,3 @@
 # JSPDF-CDRng
 
-Just to display data limitation
+Just to display data using jspdf
