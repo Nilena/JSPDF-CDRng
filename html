@@ -1,0 +1,20 @@
+<div *ngIf="!reportGenerated">
+    <div *ngIf="reportDataToDisplay" class="deploymentInfo">
+        <div [attr.id]="element1.name" *ngFor="let element1 of reportDataToDisplay; let chapterNr = index" class="one">
+            <div [attr.id]="element.title" *ngFor="let element of element1.sections; let sectionId = index"
+                class="margin-top-20">
+                <div *ngIf="element.type === 'Graph'" class="margin-top-20">
+                    <div>
+                        <div id="graph-{{chapterNr}}-{{sectionId}}" class="graph">
+                            <app-line-graph [data]="element" [graphHeight]="graphHeight"></app-line-graph>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="data-limitation" *ngIf="dataLimitation">
+        <p>{{"T_Reports.T_Data_Limitations" | translate}}</p>
+        <div [innerHTML]="dataLimitation"></div>
+    </div>
+</div>
