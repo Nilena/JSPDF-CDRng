@@ -1,0 +1,406 @@
+import { Injectable } from '@angular/core';
+import { Subject } from 'rxjs';
+
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
+@Injectable({
+  providedIn: 'root'
+})
+export class HelperService {
+  blob = new Subject<any>();
+  // Dimensions of a a4 in pt ->[595.28, 841.89]
+  // 1 mm = 2.835 pt
+  // 1 pt = 0.75 px
+  doc = new jsPDF('p', 'pt', 'a4');
+  private readonly LEFT_MARGIN: number = 42.525;
+  private readonly RIGHT_MARGIN: number = 42.525;
+  private readonly TOP_MARGIN: number = 56.7;
+  private readonly BOTTOM_MARGIN: number = 56.7;
+  private readonly HEADER_FONT_SIZE: number = 12;
+  private readonly TEXT_FONT_SIZE: number = 10;
+  private readonly CDR_IMAGE = new Image();
+  private readonly BOSCH_LOGO = new Image();
+  private readonly FOOTER_BOTTOM_MARGIN = 28.35;
+  private readonly TEXT_AREA_WIDTH = 510.2;
+  private readonly TEXT_AREA_WIDTH_IN_PX = 680.267;
+  VinNo: string = ''
+  finalY: number = 0;
+  crashDataRetriaval2 = "Crash Data Retrieval 2 Tool ";
+
+  constructor() {
+    this.CDR_IMAGE.src = '../assets/images/cdrcrash.jpg';
+    this.BOSCH_LOGO.src = '../assets/images/logo-bosch-02.jpg';
+  }
+
+  addFooter(pageNumber: any): void {
+    this.doc.setFontSize(this.TEXT_FONT_SIZE);
+    this.doc.setFont('times', 'normal');
+    const totalPages = this.doc.getNumberOfPages();
+    const str = "Page " + pageNumber + " of " + totalPages;
+    const pageSize = this.doc.internal.pageSize;
+    const pageHeight = pageSize.height
+      ? pageSize.height
+      : pageSize.getHeight();
+    this.doc.text(str, ((pageSize.width / 2) - (this.doc.getTextDimensions(str).w / 2)), pageHeight - this.FOOTER_BOTTOM_MARGIN);
+    this.doc.text(this.VinNo, this.LEFT_MARGIN, pageHeight - this.FOOTER_BOTTOM_MARGIN);
+    const strPrintedOn = `Printed on: ${new Date().toDateString() + ' at ' + new Date().toTimeString().split('GMT')[0]}`;
+    this.doc.text(strPrintedOn, pageSize.width - (this.doc.getTextDimensions(strPrintedOn).w + this.RIGHT_MARGIN), pageHeight - this.FOOTER_BOTTOM_MARGIN);
+  }
+
+  addHeader(): void {
+    this.doc.addImage(this.CDR_IMAGE, 'jpg', 462.105, 0, 113.4, 0);
+    this.doc.addImage(this.BOSCH_LOGO, 'jpg', 31.185, 2.835, 113.4, 0);
+  }
+
+  createMetaDataDoc(reportData): void {
+    let metaDataTable = new Array();
+    metaDataTable.push([
+      "User Entered VIN/Frame Number", reportData.metadata["vin"] ? reportData.metadata["vin"] : ''
+    ]);
+    metaDataTable.push([
+      "User", reportData.metadata["invName"] ? reportData.metadata["invName"] : ''
+    ]);
+    metaDataTable.push([
+      "Case Number", reportData.metadata["caseNumber"] ? reportData.metadata["caseNumber"] : ''
+    ]);
+    metaDataTable.push([
+      "EDR Data Imaging Date", reportData.metadata["invDate"] ? reportData.metadata["invDate"] : ''
+    ]);
+    metaDataTable.push([
+      "Crash Date", reportData.metadata["crashDate"] ? reportData.metadata["crashDate"] : ''
+    ]);
+    metaDataTable.push([
+      "Filename", reportData.metadata["filePath"] ? reportData.metadata["filePath"].replace(/^.*[\\\/]/, '') : ''
+    ]);
+    metaDataTable.push([
+      "Saved on", reportData.metadata["dateAndTime"] ? reportData.metadata["dateAndTime"] : ''
+    ]);
+    metaDataTable.push([
+      "Imaged with CDR version", reportData.metadata["programInfo"] ? this.crashDataRetriaval2 + reportData.metadata["programInfo"] : ''
+    ]);
+    metaDataTable.push([
+      "Imaged with software Licensed to (CompanyName)", reportData.metadata["companyName"] ? reportData.metadata["companyName"] : ''
+    ]);
+    metaDataTable.push([
+      "Reported with CDR version", reportData.metadata["reportedVersionInfo"] ? this.crashDataRetriaval2 + reportData.metadata["reportedVersionInfo"] : ''
+    ]);
+    metaDataTable.push([
+      "Reported with software Licensed to (CompanyName)", reportData.metadata["reportedCompanyName"] ? reportData.metadata["reportedCompanyName"] : ''
+    ]);
+    const binaryData = JSON.parse(reportData.metadata.binaryData);
+    metaDataTable.push([
+      "EDR Device Type", this.getModuleName(binaryData.edrDeviceType ? binaryData.edrDeviceType : '')
+    ]);
+    metaDataTable.push([
+      "Event(s) recovered", reportData.edrData.eventsRecorded ? reportData.edrData.eventsRecorded.join(', ') : ''
+    ]);
+    this.VinNo = reportData.metadata["vin"];
+
+    if (metaDataTable.length) {
+      let currentTopHight = { w: 0, h: 0 };
+      let lines;
+      //Notice Section
+      if (reportData.edrData.notice) {
+        this.doc.setFont('times', 'normal');
+        this.doc.setFontSize(this.TEXT_FONT_SIZE);
+        lines = this.doc.splitTextToSize(reportData.edrData.notice, this.TEXT_AREA_WIDTH);
+        currentTopHight = this.doc.getTextDimensions(lines);
+        this.doc.text(lines, this.LEFT_MARGIN, this.TOP_MARGIN);
+      }
+      //CDR FILE INFO Section
+      this.finalY = this.TOP_MARGIN + currentTopHight.h + this.FOOTER_BOTTOM_MARGIN;
+      autoTable(this.doc, {
+        theme: 'grid',
+        margin: { top: this.finalY },
+        styles: { cellPadding: 1, font: "Times", fontSize: this.TEXT_FONT_SIZE, textColor: 'black', lineColor: [0, 0, 0] },
+        body: metaDataTable,
+        didDrawPage: (data: any) => {
+          this.doc.setFontSize(this.HEADER_FONT_SIZE);
+          this.doc.setFont('times', 'bold');
+          this.doc.text('CDR File Information', data.settings.margin.left, (this.finalY - (this.FOOTER_BOTTOM_MARGIN/2)));
+        }
+      });
+      this.doc.outline.add(null, 'CDR File Information', { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+      //Comment Section
+      this.doc.setFontSize(this.HEADER_FONT_SIZE);
+      this.doc.setFont('times', 'bold');
+      this.doc.text('Comments', this.LEFT_MARGIN, ((this.doc as any).lastAutoTable.finalY) + this.FOOTER_BOTTOM_MARGIN);
+      this.doc.setFontSize(this.TEXT_FONT_SIZE);
+      this.doc.setFont('times', 'normal');
+      if (reportData.metadata.caseComments) {
+        lines = this.doc.splitTextToSize(reportData.metadata.caseComments, this.TEXT_AREA_WIDTH);
+        this.doc.text(lines, this.LEFT_MARGIN, ((this.doc as any).lastAutoTable.finalY) + 42.525);
+      } else {
+        this.doc.text('No comments entered.', this.LEFT_MARGIN, ((this.doc as any).lastAutoTable.finalY) + 42.525);
+      }
+      this.doc.outline.add(null, 'Comments', { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+    }
+  }
+
+  async createDataLimitationDoc(reportData: any): Promise<void> {
+    if (reportData.dataLimitation) {
+      // Due to an issue in jsPDF we cannot add header and footer if the pages are added via .HTML method.
+      // So identify the number of pages required for DL and manually add them
+      const dataLimitationsPageCount = await this.determineDataLimitationsPageCount();
+      this.doc.outline.add(null, 'Data Limitations', { pageNumber: (this.doc as any).internal.getNumberOfPages() + 1});
+      for (let i = 0; i < dataLimitationsPageCount; i++) {
+        // Manual addition of page
+        this.doc.addPage();
+      }
+      const element = document.getElementById('data-limitation');
+      await this.doc.html(
+        element,
+        {
+          y: 723,
+          autoPaging: 'text',
+          width: this.TEXT_AREA_WIDTH, // This is in pt
+          windowWidth: this.TEXT_AREA_WIDTH_IN_PX, // This is in px
+          margin: [this.TOP_MARGIN, this.LEFT_MARGIN, this.BOTTOM_MARGIN, this.RIGHT_MARGIN]
+        }
+      );
+    }
+  }
+
+  async determineDataLimitationsPageCount(): Promise<number>{
+    const element = document.getElementById('data-limitation');
+    const newDoc = new jsPDF('p', 'pt', 'a4', true);
+    await newDoc.html(
+      element,
+      {
+        y: 0,
+        autoPaging: 'text',
+        // Keep below numbers same as that from the method - createDataLimitationDoc
+        width: this.TEXT_AREA_WIDTH, // This is in pt
+        windowWidth: this.TEXT_AREA_WIDTH_IN_PX, // This is in px
+        margin: [this.TOP_MARGIN, this.LEFT_MARGIN, this.BOTTOM_MARGIN, this.RIGHT_MARGIN]
+      });
+    return (newDoc as any).internal.getNumberOfPages();
+  }
+
+  createNonDeploymentDoc(reportData: any): void {
+    //Non deployment section
+    const topBuffer = 28.35;
+    if (reportData.edrData.nonDeploymentInfo.length) {
+      for (let datas of reportData.edrData.nonDeploymentInfo) {
+        this.doc.addPage();
+        if (datas.type == 'Table') {
+          autoTable(this.doc, {
+            theme: 'grid',
+            margin: { top: this.TOP_MARGIN + 14.175, bottom: this.FOOTER_BOTTOM_MARGIN },
+            pageBreak: 'avoid',
+            rowPageBreak: 'avoid',
+            styles: { cellPadding: 2.835, fontSize: this.TEXT_FONT_SIZE, font: "times", textColor: 'black' },
+            head: datas.header ? datas.header : [],
+            body: datas.rows,
+            headStyles: {
+              fillColor: [255, 255, 255],
+              lineWidth: 0.567,
+              lineColor: [0, 0, 0],
+              fontStyle: 'bold',
+              halign: 'center'
+            },
+            bodyStyles: {
+              lineColor: [0, 0, 0]
+            },
+            showHead: "everyPage",
+            didDrawPage: (data: any) => {
+              this.doc.setFontSize(this.HEADER_FONT_SIZE);
+              this.doc.setFont('times', 'bold');
+              this.doc.text(datas.title, data.settings.margin.left, this.TOP_MARGIN);
+            }
+          });
+        } else if (datas.type === 'Text') {
+          this.doc.setFontSize(this.HEADER_FONT_SIZE);
+          this.doc.setFont('times', 'bold');
+          this.doc.text(datas.title, 15, this.TOP_MARGIN);
+
+          this.doc.setFontSize(this.TEXT_FONT_SIZE);
+          this.doc.setFont('times', 'normal');
+          this.doc.text(datas.text, 15, this.TOP_MARGIN + topBuffer);
+        }
+
+        this.doc.outline.add(null, datas.title, { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+      }
+    }
+  }
+
+  createHexaDataDoc(reportData: any): void {
+    if (reportData.edrData.hexdata) {
+      this.doc.addPage();
+      const topBuffer = 14.175;
+      this.finalY = 0;
+      // hexa title section
+      this.doc.setFontSize(this.HEADER_FONT_SIZE);
+      this.doc.setFont('times', 'bold');
+      this.doc.text(reportData.edrData.hexdata.title, this.LEFT_MARGIN, this.TOP_MARGIN);
+      // hexa info section
+      this.doc.setFont('times', 'normal');
+      this.doc.setFontSize(this.TEXT_FONT_SIZE);
+      let lines = this.doc.splitTextToSize(reportData.edrData.hexdata.info, 510.3);
+      this.finalY = this.TOP_MARGIN + topBuffer;
+      this.doc.text(lines, this.LEFT_MARGIN, this.finalY);
+      // hexa data section
+      let currentHeight = this.doc.getTextDimensions(lines);
+      this.finalY = currentHeight.h + this.finalY + topBuffer;
+      for (let [index, datas] of (reportData.edrData.hexdata.data).entries()) {
+        this.doc.setFont('courier', 'normal');
+        this.doc.setFontSize(this.TEXT_FONT_SIZE);
+        lines = this.doc.splitTextToSize(datas, 510.3);
+        this.addMultiPageText(lines, this.finalY);
+        if (index === 0) {
+          this.doc.outline.add(null, reportData['edrData']['hexdata'].title, { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+        }
+      }
+    }
+  }
+
+  addMultiPageText(lines: any, yPos: number):void {
+    // 22 is just some buffer to avoid text cut issues
+    if(yPos >= (this.doc.internal.pageSize.getHeight() - this.BOTTOM_MARGIN - 22)) {
+      this.doc.addPage();
+      this.finalY = yPos = this.TOP_MARGIN;
+    }
+    const totTextHeight = this.doc.getTextDimensions(lines).h;
+    const heightPerLine = totTextHeight / lines.length;
+    // 10 is just some buffer to avoid text cut issues
+    const availableHeight = (this.doc.internal.pageSize.getHeight() - this.BOTTOM_MARGIN - 10) - yPos;
+    if(totTextHeight > availableHeight) {
+      const possibleLines = Math.floor(availableHeight / heightPerLine);
+      const linesToAdd = lines.slice(0, possibleLines);
+      this.doc.text(linesToAdd, this.LEFT_MARGIN, this.finalY);
+      this.finalY += (possibleLines * heightPerLine);
+      lines = lines.slice(possibleLines);
+      if(lines.length > 0){
+        this.doc.addPage();
+        this.finalY = this.TOP_MARGIN;
+        this.addMultiPageText(lines, this.finalY);
+      }
+    } else {
+      this.doc.text(lines, this.LEFT_MARGIN, this.finalY);
+      this.finalY = totTextHeight + (this.FOOTER_BOTTOM_MARGIN / 2) + this.finalY;
+    }
+  }
+
+  async populateDeploymentInfo(reportData: any) {
+    let newArr: any = [];
+    for (let [chapterNr, value] of (reportData.edrData.chapters).entries()) {
+      for (let [sectionNr, data] of (value["sections"]).entries()) {
+        let text = data['title'] + ' (' + value['name'] + ')';
+        if (data.type === 'Table') {
+          newArr.push({ type: data.type, title: text, row: data["rows"], header: data.header ? [data.header] : [], name: value['name'], sections: value["sections"], })
+        } else if (data.type === 'Graph') {
+          newArr.push({ type: data.type, title: text, graphId: 'graph-' + chapterNr + '-' + sectionNr });
+        }
+      }
+    }
+    return newArr;
+  };
+
+  async generateReport(reportData: any): Promise<void> {
+    this.doc = new jsPDF('p', 'pt', 'a4', true);
+    const deploymentInfo = await this.populateDeploymentInfo(reportData);
+    this.createMetaDataDoc(reportData);
+    await this.createDataLimitationDoc(reportData);
+    this.createNonDeploymentDoc(reportData);
+    if (deploymentInfo.length) {
+      const topBuffer = 14.175;
+      let title = null;
+      let node = null;
+      for (let datas of deploymentInfo) {
+        this.doc.addPage();
+        if (datas.type == 'Table') {
+          // deployment table section
+          autoTable(this.doc, {
+            theme: 'grid',
+            margin: { top: this.TOP_MARGIN + topBuffer, bottom: this.FOOTER_BOTTOM_MARGIN },
+            pageBreak: 'avoid',
+            rowPageBreak: 'avoid',
+            styles: { cellPadding: 1.33, fontSize: this.TEXT_FONT_SIZE, font: "times", textColor: 'black' },
+            head: datas.header,
+            body: datas.row,
+            headStyles: {
+              fillColor: [255, 255, 255],
+              lineWidth: 0.567,
+              lineColor: [0, 0, 0],
+              fontStyle: 'bold',
+              halign: 'center'
+            },
+            bodyStyles: {
+              lineColor: [0, 0, 0]
+            },
+            showHead: "everyPage",
+            didDrawPage: (data: any) => {
+              this.doc.setFontSize(this.HEADER_FONT_SIZE);
+              this.doc.setFont('times', 'bold');
+              this.doc.text(datas.title, data.settings.margin.left, this.TOP_MARGIN);
+            }
+          });
+          if (title !== datas.name) {
+            node = this.doc.outline.add(null, datas.name, { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+            title = datas.name;
+          }
+          this.doc.outline.add(node, datas.title, { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+        } else {
+          // non deployment graph section
+          const element = document.getElementById(datas.graphId);
+          await html2canvas(element).then(canvas => {
+            let img = canvas.toDataURL("image/jpeg");
+            let rightMargin = 85.05;
+            const imageProps = this.doc.getImageProperties(img);
+            const pdfw = this.doc.internal.pageSize.getWidth();
+            const pdfh = (imageProps.height * pdfw) / imageProps.width;
+            this.doc.addImage(img, 'JPEG', this.LEFT_MARGIN, this.TOP_MARGIN, (pdfw - rightMargin), pdfh);
+          });
+        }
+      }
+    }
+    this.createHexaDataDoc(reportData);
+    this.createDisclaimerOfLiabilityDoc(reportData);
+    this.addHeadersFooters();
+    this.blob.next(this.doc.output('blob'));
+  }
+
+  createDisclaimerOfLiabilityDoc(reportData: any): void {
+    if (reportData.edrData.disclaimerOfLiability) {
+      this.doc.addPage();
+      this.doc.outline.add(null, reportData['edrData']['disclaimerOfLiability'].title, { pageNumber: (this.doc as any).internal.getNumberOfPages() });
+      this.finalY = 0;
+      const topBuffer = 28.35;
+      this.doc.setFont('times', 'bold');
+      this.doc.setFontSize(this.HEADER_FONT_SIZE);
+      this.doc.text(reportData.edrData.disclaimerOfLiability.title, this.LEFT_MARGIN, this.TOP_MARGIN);
+
+      this.doc.setFont('times', 'normal');
+      this.doc.setFontSize(this.TEXT_FONT_SIZE);
+      let lines = this.doc.splitTextToSize(reportData.edrData.disclaimerOfLiability.text, 510.3);
+      this.finalY = this.TOP_MARGIN + topBuffer;
+      this.doc.text(lines, this.LEFT_MARGIN, this.finalY);
+    }
+  }
+
+  addHeadersFooters(): void {
+    const pageCount = (this.doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      this.doc.setPage(i);
+      this.addHeader();
+      this.addFooter(i);
+    }
+  }
+
+  getModuleName(moduleId: string): string {
+    if (moduleId === 'ACM') {
+      return 'Airbag Control Module';
+    } else if (moduleId === 'ASCM') {
+      return 'Active Safety Control Module';
+    } else if (moduleId === 'PCM') {
+      return 'Powertrain Control Module';
+    } else if (moduleId === 'FCM') {
+      return 'Front Camera Module';
+    } else if (moduleId === 'PPM') {
+      return 'Pedestrian Protection Module';
+    }
+    return moduleId;
+  }
+
+}
