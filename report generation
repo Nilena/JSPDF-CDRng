@@ -1,0 +1,86 @@
+ ngOnInit(): void {
+    this.route.queryParams.subscribe((queryParams: any) => {
+      this.reportGenerated = false;
+      this.showSpinner = true;
+      this.cdrDownloadApiService.openCDRNXFile(queryParams['filePath']).subscribe((resp: any) => {
+        this.BLResponse = resp;
+        this.generateReport();
+      }, (_error) => {
+        this.showSpinner = false;
+        this.modalService.open(this.generatingReportDialogTemplate, { backdropClose: false, showClose: false, escClose: false });
+      });
+    });
+    this.parentForm = this.fb.group({
+      saveAs: new FormControl([]),
+      saveWithoutVIN: new FormControl([]),
+      saveAsPDF: new FormControl([]),
+      saveAsCSV: new FormControl([])
+    });
+  }
+
+  async generateReport(): Promise<void> {
+    this.BLResponse.metadata.reportedVersionInfo = await this.reportService.getCDRVersionInfo();
+    this.BLResponse.metadata.reportedCompanyName = await this.reportService.getLicensedToCompany();
+    this.reportDataToDisplay = await this.populateGraph(this.BLResponse);
+    if (this.BLResponse.edrData.dataLimitationFile) {
+      let dlResp = await lastValueFrom(this.cdrDownloadApiService.getDataLimitation(this.BLResponse.edrData.dataLimitationFile));
+      this.dataLimitation = this.sanitizer.bypassSecurityTrustHtml(dlResp ? dlResp.Content : '');
+      this.BLResponse.dataLimitation = this.dataLimitation;
+    }
+    const reportProperties = this.BLResponse.metadata;
+    this.fileProperties.forEach((property) => {
+      property.value = property.id === 1 ? reportProperties.filePath :
+        ((property.id === 2) ? reportProperties.dateAndTime :
+          ((property.id === 3) ? reportProperties.programInfo : reportProperties.programCRC));
+    });
+    setTimeout(async () => {
+      this.helperService.blob.subscribe(res => {
+        this.reportGenerated = true;
+        this.showSpinner = false;
+        this.pdfBlob = res;
+      }, (_error) => {
+        this.reportGenerated = true;
+        this.showSpinner = false;
+      });
+      await this.helperService.generateReport(this.BLResponse);
+    });
+  }
+
+  parseGraphdata(data): void {
+    for (let innerData of data['data']) {
+      innerData['data'] = innerData['values']
+    }
+    const xrange: any = _.range(data['xscale']['min'], data['xscale']['max'] + data['xscale']['step'], data['xscale']['step']);
+    data["x"] = xrange;
+    // data["legend"] = true;
+    data["tooltip"] = true;
+    data["datasets"] = data['data'];
+
+    data["xLabel"] = data['xlabel'];
+    data['yAxis'] = {};
+    data['yAxis']['stepSize'] = data['yscale']['step'];
+    data['yAxis']['label'] = data['ylabel'];
+    data['yAxis']['min'] = data['yscale']['min'];
+    data['yAxis']['max'] = data['yscale']['max'];
+
+    if (data['y1scale']) {
+      data['y1Axis'] = {};
+      data['y1Axis']['stepSize'] = data['y1scale']['step'];
+      data['y1Axis']['label'] = data['y1label'];
+      data['y1Axis']['min'] = data['y1scale']['min'];
+      data['y1Axis']['max'] = data['y1scale']['max'];
+    }
+    return data;
+  }
+  async populateGraph(BLResponse: any): Promise<void> {
+    const deploymentInfo = BLResponse.edrData.chapters;
+    for (let info of deploymentInfo) {
+      const graphData = info["sections"];
+      for (let data of graphData) {
+        if (data.type == 'Graph') {
+          this.parseGraphdata(data);
+        }
+      }
+    }
+    return deploymentInfo;
+  }
